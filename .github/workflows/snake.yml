@@ -1,42 +1,97 @@
-name: GitHub Snake Game
+name: 🐍 GitHub Snake Animation
 
 on:
-  # Schedule the workflow to run daily at midnight UTC
   schedule:
-    - cron: "0 0 * * *"
-  # Allow manual triggering of the workflow
+    - cron: "0 0 * * *"      # Daily at midnight UTC
+    - cron: "0 12 * * 0"     # Also every Sunday at noon (weekly refresh)
   workflow_dispatch:
-  # Trigger the workflow on pushes to the main branch
+    inputs:
+      force_regenerate:
+        description: "Force regenerate all animations"
+        required: false
+        default: "false"
+        type: boolean
   push:
     branches:
       - main
+
+concurrency:
+  group: snake-animation
+  cancel-in-progress: true   # Prevent overlapping runs
+
 jobs:
   generate:
+    name: 🎨 Generate Snake Animations
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+
+    permissions:
+      contents: write        # Needed to push to output branch
+
     steps:
-      # Step 1: Checkout the repository
-      - name: Checkout Repository
-        uses: actions/checkout@v3
-      # Step 2: Generate the snake animations
-      - name: Generate GitHub Contributions Snake Animations
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🐍 Generate Snake Animations
         uses: Platane/snk@v3
+        id: snake
         with:
-          # GitHub username to generate the animation for
           github_user_name: ${{ github.repository_owner }}
-          # Define the output files and their configurations
           outputs: |
             dist/github-snake.svg
             dist/github-snake-dark.svg?palette=github-dark
             dist/ocean.gif?color_snake=orange&color_dots=#bfd6f6,#8dbdff,#64a1f4,#4b91f1,#3c7dd9
+            dist/github-snake-pink.svg?palette=pink
+            dist/github-snake-teal.svg?color_snake=#00d9ff&color_dots=#1a1b27,#1a2a3a,#1a3a5c,#1a4a7e,#1a5aa0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # Step 3: Deploy the generated files to the 'output' branch
-      - name: Deploy to Output Branch
-        uses: peaceiris/actions-gh-pages@v3
+
+      - name: ✅ Verify Generated Files
+        run: |
+          echo "📁 Generated files:"
+          ls -lh dist/
+          echo ""
+          for f in dist/*; do
+            size=$(stat -c%s "$f")
+            if [ "$size" -lt 100 ]; then
+              echo "⚠️  Warning: $f looks suspiciously small ($size bytes)"
+            else
+              echo "✅ $f ($size bytes)"
+            fi
+          done
+
+      - name: 🚀 Deploy to Output Branch
+        uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./dist
           publish_branch: output
-          # Optionally, you can set a custom commit message
-          commit_message: "Update snake animation [skip ci]"
+          keep_files: false
+          commit_message: "🐍 Update snake animations [skip ci]"
+          user_name: "github-actions[bot]"
+          user_email: "github-actions[bot]@users.noreply.github.com"
+
+      - name: 📊 Summary
+        if: always()
+        run: |
+          echo "## 🐍 Snake Animation Update" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| File | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          for f in dist/*; do
+            fname=$(basename "$f")
+            if [ -f "$f" ]; then
+              size=$(stat -c%s "$f")
+              echo "| \`$fname\` | ✅ Generated (${size} bytes) |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| \`$fname\` | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🕐 Generated at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+
+      - name: 🔔 Notify on Failure
+        if: failure()
+        run: |
+          echo "::error::Snake animation generation failed! Check the logs above for details."
+          echo "::notice::You can manually re-run this workflow from the Actions tab."
